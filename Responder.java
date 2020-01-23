@@ -29,7 +29,7 @@ public class Responder {
             return responding;
         }
 
-         void setResponding(boolean responding) {
+        void setResponding(boolean responding) {
             this.responding = responding;
         }
 
@@ -44,6 +44,8 @@ public class Responder {
                     byte[] buf = new byte[16]; // TODO: right size?
                     DatagramPacket packet = new DatagramPacket(buf, buf.length);
                     socket.receive(packet);
+
+                    if (!responding) { continue; }
 
                     // Process HeartBeat
                     InetAddress address = packet.getAddress();
@@ -79,7 +81,7 @@ public class Responder {
         // TODO: test if this is actually necessary to track myself?
         this.port = port;
         this.laddr = laddr;
-        String pair = port + laddr.toString();
+        String pair = laddr.toString() + ":" + port;
         try {
             if (Responder.addrPairs.get(pair).equals(Boolean.TRUE)) {
                 throw new SocketException();
