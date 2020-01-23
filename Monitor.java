@@ -1,9 +1,9 @@
+import java.io.IOException;
+import java.net.*;
+import java.nio.ByteBuffer;
 import java.util.Dictionary;
 import java.util.Hashtable;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.net.InetAddress;
-import java.net.DatagramSocket;
-import java.net.SocketException;
 
 public class Monitor {
     // The reserved nonce value;
@@ -17,6 +17,7 @@ public class Monitor {
     String name;
     
     static long eNonce = RESERVED_NONCE;
+    static long seqNum = 0;
     int threshHold;
 
     private static boolean initialized = false;
@@ -31,6 +32,11 @@ public class Monitor {
         private DatagramSocket socket;
         private InetAddress raddr;
         private int port;
+
+        private boolean awaitingResponse;
+        private long awaitingResponseSeq;
+
+        private int failCount;
 
         boolean isMonitoring() {
             return monitoring;
@@ -52,7 +58,50 @@ public class Monitor {
 
         public void run() {
             while (true) {
-                // TODO
+                // TODO: if not awaiting response:
+                if (!monitoring) continue;
+
+                try {
+                    if (awaitingResponse) {
+                        byte[] buf = new byte[16]; // TODO: right size?
+                        DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                        try {
+                            socket.receive(packet);
+
+                            ByteBuffer bb = ByteBuffer.wrap(buf);
+                            long epochNonce = bb.getLong();
+                            long seqNum = bb.getLong();
+
+                            System.out.println("Monitor Received: " + epochNonce + ", " + seqNum); // TODO debugging - remove
+
+                            if (epochNonce == Monitor.eNonce && seqNum == awaitingResponseSeq) {
+                                // Reset failcount upon receiving a correct ack
+                                failCount = 0;
+                                awaitingResponse = false;
+                            }
+                        } catch (SocketTimeoutException ex) {
+                            failCount++;
+                            // TODO timeout
+                        }
+                        if (failCount > threshold) { // TODO: is this right?
+                            // TODO notify failure
+                        }
+                        // TODO: track time awaiting response? Otherwise receiving any extraneous packets will reset the timeout.
+                    } else {
+                        // Send Heartbeat
+                        ByteBuffer bb = ByteBuffer.allocate(16);
+                        bb.putLong(Monitor.eNonce);
+                        long seqNum = Monitor.seqNum++;
+                        bb.putLong(seqNum);
+
+                        DatagramPacket HBeat = new DatagramPacket(bb.array(), bb.position(), raddr, port);
+                        socket.send(HBeat);
+                        awaitingResponse = true;
+                        awaitingResponseSeq = seqNum;
+                    }
+                } catch (IOException ex) {
+                    // TODO
+                }
             }
         }
     }
@@ -65,7 +114,17 @@ public class Monitor {
     // reserved and cannot be used. If the epochNonce is -1 then a
     // FailureDetectorException with the msg "Monitor: Invalid Epoch" is to be thrown.
     public static LinkedBlockingQueue<Monitor> initializeMonitor(long epochNonce) throws FailureDetectorException {
-        System.out.println("initializeMonitor needs to be implemented");
+        if (initialized) {
+            throw new FailureDetectorException("Monitor: Already Initialized");
+        }
+
+        eNonce = System.currentTimeMillis();
+        seqNum = 0;
+
+        if (eNonce == -1) {
+            throw new FailureDetectorException("Monitor: Invalid Epoch");
+        }
+
         initialized = true;
         return clq;
     }
@@ -73,6 +132,7 @@ public class Monitor {
     // This class method is to cause all Monitors to stop monitoring their remote
     // node. 
     public static void stopMonitoringAll() {
+        // TODO
      	System.out.println("stopMonitoringAll needs to be implemented");
     }
 

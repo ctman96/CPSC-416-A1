@@ -43,7 +43,7 @@ public class Responder {
                     // Receive packet
                     byte[] buf = new byte[16]; // TODO: right size?
                     DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                    socket.receive(packet);
+                    socket.receive(packet); // TODO timeout?
 
                     if (!responding) { continue; }
 
@@ -55,7 +55,7 @@ public class Responder {
                     long epochNonce = bb.getLong();
                     long seqNum = bb.getLong();
 
-                    System.out.println(epochNonce + ", " + seqNum); // TODO debugging - remove
+                    System.out.println("Responder Received: " + epochNonce + ", " + seqNum); // TODO debugging - remove
 
                     // Reply Ack
                     DatagramPacket ack = new DatagramPacket(buf, buf.length, address, port);
