@@ -30,5 +30,6 @@ public class tester {
 	// If things are working we would now get a timeout experience
 	mon.startMonitoring(2);
 	fdQueue.poll(10, TimeUnit.SECONDS);
+	Monitor.stopMonitoringAll();
     }
 }

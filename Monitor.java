@@ -1,12 +1,15 @@
 import java.io.IOException;
 import java.net.*;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Monitor {
+    private static List<Monitor> monitors = new ArrayList<>();
     // The reserved nonce value;
     public static final long RESERVED_NONCE = -1;
 
@@ -258,8 +261,7 @@ public class Monitor {
     // This class method is to cause all Monitors to stop monitoring their remote
     // node. 
     public static void stopMonitoringAll() {
-        // TODO
-     	System.out.println("stopMonitoringAll needs to be implemented");
+        monitors.forEach(monitor -> monitor.stopMonitoring());
     }
 
     // This constructor sets up a Monitor, but it does not start sending heartbeat
@@ -290,6 +292,7 @@ public class Monitor {
         handlerThread = new Thread(handler);
         handlerThread.setDaemon(true);
         handlerThread.start();
+        monitors.add(this);
     }
 
     // Start (or restart) monitoring the remote node using the threshold value.
