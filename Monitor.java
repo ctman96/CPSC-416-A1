@@ -9,6 +9,9 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class Monitor {
+    // Whether to debug log
+    private static boolean DEBUG = false;
+
     private static List<Monitor> monitors = new ArrayList<>();
     // The reserved nonce value;
     public static final long RESERVED_NONCE = -1;
@@ -19,15 +22,19 @@ public class Monitor {
 
     // This variable is to be used to hold a string that unqiquelly identifies the Monitor
     String name;
-    
+
+    // epochNonce of current session
     static long eNonce = RESERVED_NONCE;
-    // Use AtomicLong for seqNum to be able to get/increment across threads
+    // Using AtomicLong for seqNum to be able to get/increment across threads
     static AtomicLong seqNum = new AtomicLong(0);
 
+
+    // Whether monitoring has been initialized
     private static boolean initialized = false;
 
     private DatagramSocket socket;
 
+    // Handler
     private Thread handlerThread;
     private MonitorHandler handler;
 
@@ -44,7 +51,6 @@ public class Monitor {
             this.sequenceNum = sequenceNum;
         }
     }
-
 
 
 
@@ -79,8 +85,8 @@ public class Monitor {
                     PacketData data = new PacketData(received, epochNonce, sequenceNum);
                     queue.put(data);
                 } catch (IOException | InterruptedException ex) {
-                    monitor.log("Caught exception in MonitorReceiver!!!");
-                    // TODO???
+                    monitor.log("WARN: Caught exception in MonitorReceiver: " + ex.getMessage());
+                    // TODO do anything??
                 }
             }
         }
@@ -189,7 +195,7 @@ public class Monitor {
 
                         // Update RTT as average of current RTT and response's RTT
                         if (awaitedSeqs.containsKey(data.sequenceNum)) {
-                            monitor.log("Received seq "+data.sequenceNum);
+                            monitor.log("Received seq "+data.sequenceNum + " was awaited, recalculating RTT");
                             long oldRTT = rtt;
                             long responseRTT = (System.nanoTime() - awaitedSeqs.remove(data.sequenceNum));
                             rtt = ( responseRTT + oldRTT ) / 2;
@@ -204,7 +210,7 @@ public class Monitor {
 
                     // Notify failure if reached failure threshold
                     if (lostMsgs >= threshold) {
-                        monitor.log("Failure threshold reached!"); // TODO debugging remove
+                        monitor.log("Failure threshold reached!");
                         clq.put(monitor);
                         // Stop monitoring
                         this.stopMonitoring();
@@ -216,7 +222,7 @@ public class Monitor {
                         ByteBuffer bb = ByteBuffer.allocate(16);
                         bb.putLong(Monitor.eNonce);
                         long sequenceNum = Monitor.seqNum.getAndIncrement();
-                        monitor.log("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum); // TODO debugging remove
+                        monitor.log("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum);
                         bb.putLong(sequenceNum);
 
                         DatagramPacket HBeat = new DatagramPacket(bb.array(), bb.position(), raddr, port);
@@ -228,8 +234,8 @@ public class Monitor {
                         awaitedSeqs.put(awaitingResponseSeq, System.nanoTime());
                     }
                 } catch (IOException | InterruptedException ex) {
-                    monitor.log("Caught exception in MonitorHandler!!!"); // TODO debugging remove
-                    // TODO ??
+                    monitor.log("WARN: Caught exception in MonitorHandler: " + ex.getMessage());
+                    // TODO Do anything?
                 }
             }
         }
@@ -322,10 +328,13 @@ public class Monitor {
         return name;
     }
 
+    public static void enableDebugLogging() {
+        DEBUG = true;
+    }
+
     private void log(String s) {
-        // TODO disable outside of debugging
-        if (true) {
-            System.out.println("[Monitor "+name+"]["+System.nanoTime()+"]"+s);
+        if (DEBUG) {
+            System.out.println("["+System.nanoTime()+"][Monitor "+name+"]"+s);
         }
     }
 }

@@ -9,18 +9,27 @@ import java.nio.ByteBuffer;
 // This class sets up and controls the part of the system that responds to heartbeat messages
 
 public class Responder {
+    // Whether to debug log
+    private static boolean DEBUG = false;
+
+    // Socket data
     private int port;
     private InetAddress laddr;
     private DatagramSocket socket;
 
+    // Handler
     private Thread thread;
     private ResponderHandler handler;
+
 
     // Runnable handler class to respond to packets
     private static class ResponderHandler implements Runnable {
 
         // Main toggle - if false discards received packets
         private boolean responding = false;
+
+        // Parent Reference
+        private Responder responder;
 
         private DatagramSocket socket;
 
@@ -32,7 +41,8 @@ public class Responder {
             this.responding = responding;
         }
 
-        ResponderHandler(DatagramSocket socket) {
+        ResponderHandler(Responder responder, DatagramSocket socket) {
+            this.responder = responder;
             this.socket = socket;
         }
 
@@ -46,7 +56,7 @@ public class Responder {
 
                     // Discard packet if not responding
                     if (!responding) {
-                        System.out.println("Discarded - Not Responding"); // TODO debugging - remove
+                        responder.log("Discarded - Not Responding");
                         continue;
                     }
 
@@ -58,15 +68,15 @@ public class Responder {
                     long epochNonce = bb.getLong();
                     long seqNum = bb.getLong();
 
-                    System.out.println("[Responder]["+System.nanoTime()+"]Handler Received: " + epochNonce + ", " + seqNum); // TODO debugging - remove
+                    responder.log("Handler Received: " + epochNonce + ", " + seqNum);
 
                     // Reply Ack
                     DatagramPacket ack = new DatagramPacket(buf, buf.length, address, port);
                     socket.send(ack);
 
                 } catch (IOException ex) {
-                    System.out.println("Caught exception in ResponseHandler!!!"); // TODO debugging remove
-                    // TODO catch here or what?
+                    responder.log("WARN: Caught exception in ResponseHandler: " + ex.getMessage());
+                    // TODO do anything here?
                 }
             }
         }
@@ -90,7 +100,7 @@ public class Responder {
         } catch (SecurityException ex) {
             throw new FailureDetectorException("Security Exception");
         }
-        handler = new ResponderHandler(socket);
+        handler = new ResponderHandler(this, socket);
         thread = new Thread(handler);
         thread.setDaemon(true);
         thread.start();
@@ -102,6 +112,7 @@ public class Responder {
     // If any other problem is detected then the FailureDectorException is thrown
     public void startResponding()throws FailureDetectorException {
         if (!handler.isResponding()) {
+            log("Start Responding");
             handler.setResponding(true);
         } else {
             throw new FailureDetectorException("Already Running");
@@ -111,7 +122,18 @@ public class Responder {
     // Once this method returns heartbeat messages will be discraded/ignored until a subsequent
     // startResponding call is made.
     public void stopResponding() {
+        log("Stop Responding");
         handler.setResponding(false);
+    }
+
+    public static void enableDebugLogging() {
+        DEBUG = true;
+    }
+
+    private void log(String s) {
+        if (DEBUG) {
+            System.out.println("["+System.nanoTime()+"][Responder "+laddr+":"+port+"]"+s);
+        }
     }
 }
     
