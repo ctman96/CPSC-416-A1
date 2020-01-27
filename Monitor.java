@@ -72,7 +72,8 @@ public class Monitor {
             while (true) {
                 try {
                     // Receive packet
-                    byte[] buf = new byte[16]; // TODO: right size?
+                    byte[] buf = new byte[1024];
+                    // TODO: do we need to verify?
                     DatagramPacket packet = new DatagramPacket(buf, buf.length);
                     socket.receive(packet);
                     // Parse into longs
@@ -161,16 +162,9 @@ public class Monitor {
         public void run() {
             while (true) {
                 try {
-                    // Check if timed out, and if so increment fails
-                    if (awaitingResponse && (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) > rtt) {
-                        monitor.log("Seq " + awaitingResponseSeq + " timed out: " + (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) + " vs RTT of " + rtt);
-                        lostMsgs++;
-                        awaitingResponse = false;
-                    }
-
                     // Process any received packet data from the queue
-                    while (!queue.isEmpty()) {
-                        PacketData data = queue.take();
+                    PacketData data;
+                    while ((data = queue.poll()) != null) {
                         monitor.log("Handler received " + data.epochNonce + ", " + data.sequenceNum);
 
                         // Discard if not monitoring
@@ -207,6 +201,13 @@ public class Monitor {
 
                     // Stop here if not monitoring
                     if (!monitoring) continue;
+
+                    // Check if timed out, and if so increment fails
+                    if (awaitingResponse && (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) > rtt + 500000) { // Add 0.5ms of wiggle room due to queue ?? TODO
+                        monitor.log("Seq " + awaitingResponseSeq + " timed out: " + (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) + " vs RTT of " + rtt);
+                        lostMsgs++;
+                        awaitingResponse = false;
+                    }
 
                     // Notify failure if reached failure threshold
                     if (lostMsgs >= threshold) {
@@ -334,7 +335,7 @@ public class Monitor {
 
     private void log(String s) {
         if (DEBUG) {
-            System.out.println("["+System.nanoTime()+"][Monitor "+name+"]"+s);
+            System.out.println("["+System.nanoTime()+"][Monitor "+name+"] - "+s);
         }
     }
 }

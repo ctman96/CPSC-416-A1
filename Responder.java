@@ -50,7 +50,8 @@ public class Responder {
             while(true) {
                 try {
                     // Receive packet
-                    byte[] buf = new byte[16]; // TODO: right size?
+                    byte[] buf = new byte[1024];
+                    // TODO: do we need to verify?
                     DatagramPacket packet = new DatagramPacket(buf, buf.length);
                     socket.receive(packet);
 
@@ -70,8 +71,12 @@ public class Responder {
 
                     responder.log("Handler Received: " + epochNonce + ", " + seqNum);
 
+                    bb = ByteBuffer.allocate(16);
+                    bb.putLong(epochNonce);
+                    bb.putLong(seqNum);
+
                     // Reply Ack
-                    DatagramPacket ack = new DatagramPacket(buf, buf.length, address, port);
+                    DatagramPacket ack = new DatagramPacket(bb.array(), bb.position(), address, port);
                     socket.send(ack);
 
                 } catch (IOException ex) {
@@ -132,7 +137,7 @@ public class Responder {
 
     private void log(String s) {
         if (DEBUG) {
-            System.out.println("["+System.nanoTime()+"][Responder "+laddr+":"+port+"]"+s);
+            System.out.println("["+System.nanoTime()+"][Responder "+laddr+":"+port+"] - "+s);
         }
     }
 }
