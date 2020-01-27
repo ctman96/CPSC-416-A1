@@ -45,7 +45,10 @@ public class Responder {
                     socket.receive(packet);
 
                     // Discard packet if not responding
-                    if (!responding) { continue; }
+                    if (!responding) {
+                        System.out.println("Discarded - Not Responding"); // TODO debugging - remove
+                        continue;
+                    }
 
                     // Process HeartBeat
                     InetAddress address = packet.getAddress();
@@ -55,7 +58,7 @@ public class Responder {
                     long epochNonce = bb.getLong();
                     long seqNum = bb.getLong();
 
-                    System.out.println("Responder Received: " + epochNonce + ", " + seqNum); // TODO debugging - remove
+                    System.out.println("[Responder]["+System.nanoTime()+"]Handler Received: " + epochNonce + ", " + seqNum); // TODO debugging - remove
 
                     // Reply Ack
                     DatagramPacket ack = new DatagramPacket(buf, buf.length, address, port);

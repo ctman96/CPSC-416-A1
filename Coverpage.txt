@@ -28,5 +28,7 @@ Name : Cody Newman
 St. No: 35833145
 
 
+- Assumptions:
+    - Assumed for StartMonitor, that "Start (or restart) monitoring" involves a full restart, clearing currently awaited seqNums and resetting lostmsgs
 
 
