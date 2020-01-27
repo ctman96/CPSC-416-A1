@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class Monitor {
     // The reserved nonce value;
@@ -17,7 +18,7 @@ public class Monitor {
     String name;
     
     static long eNonce = RESERVED_NONCE;
-    static volatile long seqNum = 0;
+    static AtomicLong seqNum = new AtomicLong(0);
     int threshHold;
 
     private static boolean initialized = false;
@@ -55,7 +56,7 @@ public class Monitor {
                     DatagramPacket packet = new DatagramPacket(buf, buf.length);
                     socket.receive(packet);
                     ByteBuffer bb = ByteBuffer.wrap(buf);
-                    long received = System.currentTimeMillis();
+                    long received = System.nanoTime();
                     long epochNonce = bb.getLong();
                     long sequenceNum = bb.getLong();
                     System.out.println("Monitor Received: " + epochNonce + ", " + sequenceNum); // TODO debugging - remove
@@ -90,13 +91,13 @@ public class Monitor {
         private MonitorReceiver receiver;
         private Thread receiverThread;
 
-        private Map<Long, Long> awaitedSeqs = new HashMap<>(); // TODO / DONEish: combine into a dictionary of seqNum->startTime, and remove from dictionary when received. Or after certain amount of time??
+        private Map<Long, Long> awaitedSeqs = new HashMap<>(); // TODO remove entry after certain amount of time??? Completely lost packets will currently leak memory
 
         // Track if actively waiting for a response for which seqNum
         private boolean awaitingResponse;
         private long awaitingResponseSeq;
 
-        private long rtt = 3000;
+        private long rtt = 3000000000L;
 
         private int failCount;
 
@@ -136,8 +137,8 @@ public class Monitor {
             while (true) {
                 try {
                     // Check if timed out, and if so increment fails
-                    if (awaitingResponse && System.currentTimeMillis() - awaitedSeqs.get(awaitingResponseSeq) > rtt) {
-                        System.out.println("Seq " + awaitingResponseSeq + " timed out"); // TODO debugging remove
+                    if (awaitingResponse && (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) > rtt) {
+                        System.out.println("Seq " + awaitingResponseSeq + " timed out: " + (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) + " vs RTT of " + rtt); // TODO debugging remove
                         failCount++;
                         awaitingResponse = false;
                     }
@@ -160,8 +161,9 @@ public class Monitor {
 
                         // Update RTT as average of current RTT and response's RTT
                         if (awaitedSeqs.containsKey(data.sequenceNum)) {
+                            System.out.println("Received seq "+data.sequenceNum);
                             System.out.println("Old RTT: " + rtt); // TODO debugging remove
-                            long responseRTT = (System.currentTimeMillis() - awaitedSeqs.remove(data.sequenceNum));
+                            long responseRTT = (System.nanoTime() - awaitedSeqs.remove(data.sequenceNum));
                             System.out.println("Res RTT: " + responseRTT); // TODO debugging remove
                             rtt = ( responseRTT + rtt ) / 2;
                             System.out.println("New RTT: " + rtt); // TODO debugging remove
@@ -177,13 +179,14 @@ public class Monitor {
                         clq.put(monitor);
                         // Stop monitoring
                         this.stopMonitoring();
+                        continue;
                     }
 
                     if (!awaitingResponse) {
                         // Send Heartbeat
                         ByteBuffer bb = ByteBuffer.allocate(16);
                         bb.putLong(Monitor.eNonce);
-                        long sequenceNum = Monitor.seqNum++;
+                        long sequenceNum = Monitor.seqNum.getAndIncrement();
                         System.out.println("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum); // TODO debugging remove
                         bb.putLong(sequenceNum);
 
@@ -193,7 +196,7 @@ public class Monitor {
                         awaitingResponseSeq = sequenceNum;
 
                         // Add seqNum and time to the list of awaited responses
-                        awaitedSeqs.put(awaitingResponseSeq, System.currentTimeMillis());
+                        awaitedSeqs.put(awaitingResponseSeq, System.nanoTime());
                     }
                 } catch (IOException | InterruptedException ex) {
                     System.out.println("Caught exception in MonitorHandler!!!"); // TODO debugging remove
@@ -216,7 +219,7 @@ public class Monitor {
         }
 
         eNonce = epochNonce;
-        seqNum = 0;
+        seqNum = new AtomicLong(0);
 
         if (eNonce == -1) {
             throw new FailureDetectorException("Monitor: Invalid Epoch");
