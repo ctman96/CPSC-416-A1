@@ -5,14 +5,10 @@ import java.net.DatagramSocket;
 import java.net.SocketException;
 import java.net.DatagramPacket;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.Dictionary;
-import java.util.Hashtable;
 
 // This class sets up and controls the part of the system that responds to heartbeat messages
 
 public class Responder {
-    private static Dictionary<String, Boolean> addrPairs = new Hashtable<>();
     private int port;
     private InetAddress laddr;
     private DatagramSocket socket;
@@ -22,7 +18,10 @@ public class Responder {
 
     // Runnable handler class to respond to packets
     private static class ResponderHandler implements Runnable {
+
+        // Main toggle - if false discards received packets
         private boolean responding = false;
+
         private DatagramSocket socket;
 
         boolean isResponding() {
@@ -43,8 +42,9 @@ public class Responder {
                     // Receive packet
                     byte[] buf = new byte[16]; // TODO: right size?
                     DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                    socket.receive(packet); // TODO timeout?
+                    socket.receive(packet);
 
+                    // Discard packet if not responding
                     if (!responding) { continue; }
 
                     // Process HeartBeat
@@ -60,7 +60,9 @@ public class Responder {
                     // Reply Ack
                     DatagramPacket ack = new DatagramPacket(buf, buf.length, address, port);
                     socket.send(ack);
+
                 } catch (IOException ex) {
+                    System.out.println("Caught exception in ResponseHandler!!!"); // TODO debugging remove
                     // TODO catch here or what?
                 }
             }
@@ -78,27 +80,17 @@ public class Responder {
 
 
     public Responder(int port, InetAddress laddr) throws FailureDetectorException, SocketException {
-        // TODO: test if this is actually necessary to track myself?
         this.port = port;
         this.laddr = laddr;
-        String pair = laddr.toString() + ":" + port;
-        try {
-            if (Responder.addrPairs.get(pair).equals(Boolean.TRUE)) {
-                throw new SocketException();
-            }
-        } catch (NullPointerException ex) {
-            // Expected
-        }
         try {
             socket = new DatagramSocket(port, laddr);
         } catch (SecurityException ex) {
-            throw new FailureDetectorException("Security Exception"); // TODO?
+            throw new FailureDetectorException("Security Exception");
         }
-        handler = new ResponderHandler(socket); // TODO: here or in startResponding?
+        handler = new ResponderHandler(socket);
         thread = new Thread(handler);
         thread.setDaemon(true);
         thread.start();
-        Responder.addrPairs.put(pair, Boolean.TRUE);
     }
 
     // Prior to this method being invoked all heartbeat messages are ignored/discarded.

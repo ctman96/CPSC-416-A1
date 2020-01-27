@@ -1,8 +1,8 @@
 import java.io.IOException;
 import java.net.*;
 import java.nio.ByteBuffer;
-import java.util.Dictionary;
-import java.util.Hashtable;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class Monitor {
@@ -17,90 +17,187 @@ public class Monitor {
     String name;
     
     static long eNonce = RESERVED_NONCE;
-    static long seqNum = 0;
+    static volatile long seqNum = 0;
     int threshHold;
 
     private static boolean initialized = false;
     private DatagramSocket socket;
-    private Thread thread;
+    private Thread handlerThread;
     private MonitorHandler handler;
 
-    // Runnable handler to
+    private static class PacketData {
+        public long received;
+        public long epochNonce;
+        public long sequenceNum;
+        PacketData(long received, long epochNonce, long sequenceNum) {
+            this.received = received;
+            this.epochNonce = epochNonce;
+            this.sequenceNum = sequenceNum;
+        }
+    }
+
+    // Purely handles receiving packets, putting their data into the given queue
+    private static class MonitorReceiver implements Runnable {
+        private DatagramSocket socket;
+
+        // Queue into which received packet data is put
+        private LinkedBlockingQueue<PacketData> queue;
+
+        MonitorReceiver(DatagramSocket socket, LinkedBlockingQueue<PacketData> queue) {
+            this.socket = socket;
+            this.queue = queue;
+        }
+
+        public void run() {
+            while (true) {
+                try {
+                    byte[] buf = new byte[16]; // TODO: right size?
+                    DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                    socket.receive(packet);
+                    ByteBuffer bb = ByteBuffer.wrap(buf);
+                    long received = System.currentTimeMillis();
+                    long epochNonce = bb.getLong();
+                    long sequenceNum = bb.getLong();
+                    System.out.println("Monitor Received: " + epochNonce + ", " + sequenceNum); // TODO debugging - remove
+                    PacketData data = new PacketData(received, epochNonce, sequenceNum);
+                    queue.put(data);
+                } catch (IOException | InterruptedException ex) {
+                    System.out.println("Caught exception in MonitorReceiver!!!"); // TODO debugging remove
+                    // TODO???
+                }
+            }
+        }
+    }
+
+    // Main handler to manage monitoring
     private static class MonitorHandler implements Runnable {
+        // Parent reference
+        Monitor monitor;
+
+        // Main toggle, if false will discard any received packets and won't send out any heartbeats
         private boolean monitoring = false;
+
+        // Number of consecutive failures required before notifying failure
         private int threshold = 1;
+
+        // Socket
         private DatagramSocket socket;
         private InetAddress raddr;
         private int port;
 
+        // Receiver
+        private LinkedBlockingQueue<PacketData> queue = new LinkedBlockingQueue<>();
+        private MonitorReceiver receiver;
+        private Thread receiverThread;
+
+        private Map<Long, Long> awaitedSeqs = new HashMap<>(); // TODO / DONEish: combine into a dictionary of seqNum->startTime, and remove from dictionary when received. Or after certain amount of time??
+
+        // Track if actively waiting for a response for which seqNum
         private boolean awaitingResponse;
         private long awaitingResponseSeq;
+
+        private long rtt = 3000;
 
         private int failCount;
 
         boolean isMonitoring() {
-            return monitoring;
+            return this.monitoring;
         }
 
-        void setMonitoring(boolean responding) {
-            this.monitoring = responding;
+        void startMonitoring() {
+            this.monitoring = true;
+        }
+
+        // Stops monitoring and resets necessary fields
+        void stopMonitoring() {
+            this.monitoring = false;
+            this.awaitingResponse = false;
+            this.awaitedSeqs.clear();
+            this.failCount = 0;
         }
 
         void setThreshold(int threshold) {
             this.threshold = threshold;
         }
 
-        MonitorHandler(DatagramSocket socket, InetAddress raddr, int port) {
+        MonitorHandler(Monitor monitor, DatagramSocket socket, InetAddress raddr, int port) {
+            this.monitor = monitor;
             this.socket = socket;
             this.raddr = raddr;
             this.port = port;
+            // Create and start the receiver to collect packets
+            this.receiver = new MonitorReceiver(socket, queue);
+            receiverThread = new Thread(receiver);
+            receiverThread.setDaemon(true);
+            receiverThread.start();
         }
 
         public void run() {
             while (true) {
-                // TODO: if not awaiting response:
-                if (!monitoring) continue;
-
                 try {
-                    if (awaitingResponse) {
-                        byte[] buf = new byte[16]; // TODO: right size?
-                        DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                        try {
-                            socket.receive(packet);
+                    // Check if timed out, and if so increment fails
+                    if (awaitingResponse && System.currentTimeMillis() - awaitedSeqs.get(awaitingResponseSeq) > rtt) {
+                        System.out.println("Seq " + awaitingResponseSeq + " timed out"); // TODO debugging remove
+                        failCount++;
+                        awaitingResponse = false;
+                    }
 
-                            ByteBuffer bb = ByteBuffer.wrap(buf);
-                            long epochNonce = bb.getLong();
-                            long seqNum = bb.getLong();
+                    // Process any received packet data from the queue
+                    while (!queue.isEmpty()) {
+                        PacketData data = queue.take();
+                        // Discard if not monitoring
+                        if (!monitoring) continue;
+                        // Discard if from different epochNonce
+                        if (data.epochNonce != Monitor.eNonce) continue;
 
-                            System.out.println("Monitor Received: " + epochNonce + ", " + seqNum); // TODO debugging - remove
-
-                            if (epochNonce == Monitor.eNonce && seqNum == awaitingResponseSeq) {
-                                // Reset failcount upon receiving a correct ack
-                                failCount = 0;
-                                awaitingResponse = false;
-                            }
-                        } catch (SocketTimeoutException ex) {
-                            failCount++;
-                            // TODO timeout
+                        // If it is a response to the latest heartbeat, register alive and update rtt
+                        if (awaitingResponse && data.sequenceNum == awaitingResponseSeq) {
+                            System.out.println("Received ack"); // TODO debugging remove
+                            // Reset failcount upon receiving a correct ack
+                            failCount = 0;
+                            awaitingResponse = false;
                         }
-                        if (failCount > threshold) { // TODO: is this right?
-                            // TODO notify failure
+
+                        // Update RTT as average of current RTT and response's RTT
+                        if (awaitedSeqs.containsKey(data.sequenceNum)) {
+                            System.out.println("Old RTT: " + rtt); // TODO debugging remove
+                            long responseRTT = (System.currentTimeMillis() - awaitedSeqs.remove(data.sequenceNum));
+                            System.out.println("Res RTT: " + responseRTT); // TODO debugging remove
+                            rtt = ( responseRTT + rtt ) / 2;
+                            System.out.println("New RTT: " + rtt); // TODO debugging remove
                         }
-                        // TODO: track time awaiting response? Otherwise receiving any extraneous packets will reset the timeout.
-                    } else {
+                    }
+
+                    // Stop here if not monitoring
+                    if (!monitoring) continue;
+
+                    // Notify failure if reached failure threshold
+                    if (failCount >= threshold) {
+                        System.out.println("Failure threshold reached!"); // TODO debugging remove
+                        clq.put(monitor);
+                        // Stop monitoring
+                        this.stopMonitoring();
+                    }
+
+                    if (!awaitingResponse) {
                         // Send Heartbeat
                         ByteBuffer bb = ByteBuffer.allocate(16);
                         bb.putLong(Monitor.eNonce);
-                        long seqNum = Monitor.seqNum++;
-                        bb.putLong(seqNum);
+                        long sequenceNum = Monitor.seqNum++;
+                        System.out.println("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum); // TODO debugging remove
+                        bb.putLong(sequenceNum);
 
                         DatagramPacket HBeat = new DatagramPacket(bb.array(), bb.position(), raddr, port);
                         socket.send(HBeat);
                         awaitingResponse = true;
-                        awaitingResponseSeq = seqNum;
+                        awaitingResponseSeq = sequenceNum;
+
+                        // Add seqNum and time to the list of awaited responses
+                        awaitedSeqs.put(awaitingResponseSeq, System.currentTimeMillis());
                     }
-                } catch (IOException ex) {
-                    // TODO
+                } catch (IOException | InterruptedException ex) {
+                    System.out.println("Caught exception in MonitorHandler!!!"); // TODO debugging remove
+                    // TODO ??
                 }
             }
         }
@@ -118,7 +215,7 @@ public class Monitor {
             throw new FailureDetectorException("Monitor: Already Initialized");
         }
 
-        eNonce = System.currentTimeMillis();
+        eNonce = epochNonce;
         seqNum = 0;
 
         if (eNonce == -1) {
@@ -158,12 +255,12 @@ public class Monitor {
         try {
             socket = new DatagramSocket(lport, laddr);
         } catch (SecurityException ex) {
-            throw new FailureDetectorException("Security Exception"); // TODO?
+            throw new FailureDetectorException("Security Exception");
         }
-        handler = new MonitorHandler(socket, raddr, port); // TODO: here or in startMonitoring
-        thread = new Thread(handler);
-        thread.setDaemon(true);
-        thread.start();
+        handler = new MonitorHandler(this, socket, raddr, port);
+        handlerThread = new Thread(handler);
+        handlerThread.setDaemon(true);
+        handlerThread.start();
     }
 
     // Start (or restart) monitoring the remote node using the threshold value.
@@ -172,7 +269,7 @@ public class Monitor {
     public void startMonitoring(int threshold) throws FailureDetectorException {
         if (initialized) {
             handler.setThreshold(threshold);
-            handler.setMonitoring(true);
+            handler.startMonitoring();
         } else {
             throw new FailureDetectorException("Monitoring has not been initialized");
         }
@@ -182,7 +279,7 @@ public class Monitor {
     // then nothing is done. Any ACK messages received after this message are to be
     // ignored.
     public void stopMonitoring() {
-	    handler.setMonitoring(false);
+	    handler.stopMonitoring();
     }
 
     // Return the user supplied name for this Monitor
