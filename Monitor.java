@@ -120,7 +120,7 @@ public class Monitor {
         private boolean awaitingResponse;
         private long awaitingResponseSeq;
 
-        private long rtt = 3000000000L;
+        private long rtt = 3000;
 
         private int lostMsgs;
 
