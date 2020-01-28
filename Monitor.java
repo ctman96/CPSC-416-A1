@@ -42,11 +42,9 @@ public class Monitor {
 
     // Just wraps received packet data
     private static class PacketData {
-        public long received;
         public long epochNonce;
         public long sequenceNum;
-        PacketData(long received, long epochNonce, long sequenceNum) {
-            this.received = received;
+        PacketData(long epochNonce, long sequenceNum) {
             this.epochNonce = epochNonce;
             this.sequenceNum = sequenceNum;
         }
@@ -78,12 +76,11 @@ public class Monitor {
                     socket.receive(packet);
                     // Parse into longs
                     ByteBuffer bb = ByteBuffer.wrap(buf);
-                    long received = System.nanoTime();
                     long epochNonce = bb.getLong();
                     long sequenceNum = bb.getLong();
                     monitor.log("Receiver received: " + epochNonce + ", " + sequenceNum);
                     // Wrap in PacketData class and add to queue
-                    PacketData data = new PacketData(received, epochNonce, sequenceNum);
+                    PacketData data = new PacketData(epochNonce, sequenceNum);
                     queue.put(data);
                 } catch (IOException | InterruptedException ex) {
                     monitor.log("WARN: Caught exception in MonitorReceiver: " + ex.getMessage());
@@ -191,8 +188,9 @@ public class Monitor {
                         if (awaitedSeqs.containsKey(data.sequenceNum)) {
                             monitor.log("Received seq "+data.sequenceNum + " was awaited, recalculating RTT");
                             long oldRTT = rtt;
-                            long responseRTT = (System.nanoTime() - awaitedSeqs.remove(data.sequenceNum));
+                            long responseRTT = (System.currentTimeMillis() - awaitedSeqs.remove(data.sequenceNum));
                             rtt = ( responseRTT + oldRTT ) / 2;
+                            if (rtt <= 0) rtt = 1;
                             monitor.log("Current RTT: " + oldRTT + " , Res RTT: " + responseRTT + " , New RTT: " + rtt);
                         } else {
                             monitor.log(data.epochNonce + ", " + data.sequenceNum + " - Was not an awaited seq");
@@ -203,8 +201,8 @@ public class Monitor {
                     if (!monitoring) continue;
 
                     // Check if timed out, and if so increment fails
-                    if (awaitingResponse && (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) > rtt + 500000) { // Add 0.5ms of wiggle room due to queue ?? TODO
-                        monitor.log("Seq " + awaitingResponseSeq + " timed out: " + (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) + " vs RTT of " + rtt);
+                    if (awaitingResponse && (System.currentTimeMillis() - awaitedSeqs.get(awaitingResponseSeq)) > rtt) {
+                        monitor.log("Seq " + awaitingResponseSeq + " timed out: " + (System.currentTimeMillis() - awaitedSeqs.get(awaitingResponseSeq)) + " vs RTT of " + rtt);
                         lostMsgs++;
                         awaitingResponse = false;
                     }
@@ -232,7 +230,7 @@ public class Monitor {
                         awaitingResponseSeq = sequenceNum;
 
                         // Add seqNum and time to the list of awaited responses
-                        awaitedSeqs.put(awaitingResponseSeq, System.nanoTime());
+                        awaitedSeqs.put(awaitingResponseSeq, System.currentTimeMillis());
                     }
                 } catch (IOException | InterruptedException ex) {
                     monitor.log("WARN: Caught exception in MonitorHandler: " + ex.getMessage());
