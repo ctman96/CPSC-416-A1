@@ -159,6 +159,23 @@ public class Monitor {
         public void run() {
             while (true) {
                 try {
+                    if (!awaitingResponse) {
+                        // Send Heartbeat
+                        ByteBuffer bb = ByteBuffer.allocate(16);
+                        bb.putLong(Monitor.eNonce);
+                        long sequenceNum = Monitor.seqNum.getAndIncrement();
+                        monitor.log("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum);
+                        bb.putLong(sequenceNum);
+
+                        DatagramPacket HBeat = new DatagramPacket(bb.array(), bb.position(), raddr, port);
+                        socket.send(HBeat);
+                        awaitingResponse = true;
+                        awaitingResponseSeq = sequenceNum;
+
+                        // Add seqNum and time to the list of awaited responses
+                        awaitedSeqs.put(awaitingResponseSeq, System.currentTimeMillis());
+                    }
+
                     // Process any received packet data from the queue
                     PacketData data;
                     while ((data = queue.poll()) != null) {
@@ -215,23 +232,6 @@ public class Monitor {
                         // Stop monitoring
                         this.stopMonitoring();
                         continue;
-                    }
-
-                    if (!awaitingResponse) {
-                        // Send Heartbeat
-                        ByteBuffer bb = ByteBuffer.allocate(16);
-                        bb.putLong(Monitor.eNonce);
-                        long sequenceNum = Monitor.seqNum.getAndIncrement();
-                        monitor.log("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum);
-                        bb.putLong(sequenceNum);
-
-                        DatagramPacket HBeat = new DatagramPacket(bb.array(), bb.position(), raddr, port);
-                        socket.send(HBeat);
-                        awaitingResponse = true;
-                        awaitingResponseSeq = sequenceNum;
-
-                        // Add seqNum and time to the list of awaited responses
-                        awaitedSeqs.put(awaitingResponseSeq, System.currentTimeMillis());
                     }
                 } catch (IOException | InterruptedException ex) {
                     monitor.log("WARN: Caught exception in MonitorHandler: " + ex.getMessage());
