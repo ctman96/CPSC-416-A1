@@ -186,6 +186,7 @@ public class Monitor {
 
                         // Update RTT as average of current RTT and response's RTT
                         if (awaitedSeqs.containsKey(data.sequenceNum)) {
+                            lostMsgs = 0;
                             monitor.log("Received seq "+data.sequenceNum + " was awaited, recalculating RTT");
                             long oldRTT = rtt;
                             long responseRTT = (System.currentTimeMillis() - awaitedSeqs.remove(data.sequenceNum));
