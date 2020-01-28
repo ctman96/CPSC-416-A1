@@ -120,7 +120,7 @@ public class Monitor {
         private boolean awaitingResponse;
         private long awaitingResponseSeq;
 
-        private long rtt = 3000;
+        private long rtt = 3000000000L;
 
         private int lostMsgs;
 
@@ -159,23 +159,6 @@ public class Monitor {
         public void run() {
             while (true) {
                 try {
-                    if (!awaitingResponse) {
-                        // Send Heartbeat
-                        ByteBuffer bb = ByteBuffer.allocate(16);
-                        bb.putLong(Monitor.eNonce);
-                        long sequenceNum = Monitor.seqNum.getAndIncrement();
-                        monitor.log("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum);
-                        bb.putLong(sequenceNum);
-
-                        DatagramPacket HBeat = new DatagramPacket(bb.array(), bb.position(), raddr, port);
-                        socket.send(HBeat);
-                        awaitingResponse = true;
-                        awaitingResponseSeq = sequenceNum;
-
-                        // Add seqNum and time to the list of awaited responses
-                        awaitedSeqs.put(awaitingResponseSeq, System.currentTimeMillis());
-                    }
-
                     // Process any received packet data from the queue
                     PacketData data;
                     while ((data = queue.poll()) != null) {
@@ -206,9 +189,9 @@ public class Monitor {
                             lostMsgs = 0;
                             monitor.log("Received seq "+data.sequenceNum + " was awaited, recalculating RTT");
                             long oldRTT = rtt;
-                            long responseRTT = (System.currentTimeMillis() - awaitedSeqs.remove(data.sequenceNum));
+                            long responseRTT = (System.nanoTime() - awaitedSeqs.remove(data.sequenceNum));
                             rtt = ( responseRTT + oldRTT ) / 2;
-                            if (rtt <= 0) rtt = 1;
+                            if (rtt <= 2000000) rtt = 2000000; // Minimum value of 2ms
                             monitor.log("Current RTT: " + oldRTT + " , Res RTT: " + responseRTT + " , New RTT: " + rtt);
                         } else {
                             monitor.log(data.epochNonce + ", " + data.sequenceNum + " - Was not an awaited seq");
@@ -219,8 +202,8 @@ public class Monitor {
                     if (!monitoring) continue;
 
                     // Check if timed out, and if so increment fails
-                    if (awaitingResponse && (System.currentTimeMillis() - awaitedSeqs.get(awaitingResponseSeq)) > rtt) {
-                        monitor.log("Seq " + awaitingResponseSeq + " timed out: " + (System.currentTimeMillis() - awaitedSeqs.get(awaitingResponseSeq)) + " vs RTT of " + rtt);
+                    if (awaitingResponse && (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) > rtt) {
+                        monitor.log("Seq " + awaitingResponseSeq + " timed out: " + (System.nanoTime() - awaitedSeqs.get(awaitingResponseSeq)) + " vs RTT of " + rtt);
                         lostMsgs++;
                         awaitingResponse = false;
                     }
@@ -232,6 +215,23 @@ public class Monitor {
                         // Stop monitoring
                         this.stopMonitoring();
                         continue;
+                    }
+
+                    if (!awaitingResponse) {
+                        // Send Heartbeat
+                        ByteBuffer bb = ByteBuffer.allocate(16);
+                        bb.putLong(Monitor.eNonce);
+                        long sequenceNum = Monitor.seqNum.getAndIncrement();
+                        monitor.log("Monitor Sent: " + Monitor.eNonce + ", " + sequenceNum);
+                        bb.putLong(sequenceNum);
+
+                        DatagramPacket HBeat = new DatagramPacket(bb.array(), bb.position(), raddr, port);
+                        socket.send(HBeat);
+                        awaitingResponse = true;
+                        awaitingResponseSeq = sequenceNum;
+
+                        // Add seqNum and time to the list of awaited responses
+                        awaitedSeqs.put(awaitingResponseSeq, System.nanoTime());
                     }
                 } catch (IOException | InterruptedException ex) {
                     monitor.log("WARN: Caught exception in MonitorHandler: " + ex.getMessage());
