@@ -32,4 +32,4 @@ St. No: 35833145
     - Assumed for StartMonitor, that "Start (or restart) monitoring" involves a full restart, clearing currently awaited seqNums and resetting lostmsgs
 
 - Implementation Justifications
-    - Using nanoseconds for RTT, using a minimum value of 2ms as it would otherwise round down to 0 or be way too sensitive to small changes
+    - Using nanoseconds for RTT, using a minimum value of 2ms as it would otherwise be way too sensitive to small changes
